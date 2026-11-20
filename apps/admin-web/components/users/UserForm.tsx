@@ -14,6 +14,7 @@ const userSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
   role: z.enum(['admin', 'teacher', 'student']),
   phone: z.string().optional(),
+  phone_number: z.string().optional(),
   password: z
     .string()
     .optional()
@@ -45,7 +46,8 @@ export function UserForm({ initialData, onSubmit, onCancel, isLoading = false }:
       full_name: initialData?.full_name || '',
       email: initialData?.email || '',
       role: initialData?.role || 'student',
-      phone: initialData?.phone || '',
+      phone: initialData?.phone || initialData?.phone_number || '',
+      phone_number: initialData?.phone || initialData?.phone_number || '',
       password: '',
       is_active: initialData?.is_active ?? true,
     },

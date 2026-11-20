@@ -6,11 +6,17 @@ export interface User {
   full_name: string;
   role: UserRole;
   is_active: boolean;
+  phone?: string;
   phone_number?: string;
   created_at: string;
   updated_at?: string;
   student_profile?: StudentProfile;
   teacher_profile?: TeacherProfile;
+  roll_number?: string;
+  employee_id?: string;
+  department_name?: string;
+  designation?: string;
+  section_name?: string;
 }
 
 export interface StudentProfile {

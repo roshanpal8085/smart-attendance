@@ -50,3 +50,27 @@ class User(TimestampedBase):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def roll_number(self) -> Optional[str]:
+        if self.student_profile:
+            return self.student_profile.roll_number
+        return None
+
+    @property
+    def employee_id(self) -> Optional[str]:
+        if self.teacher_profile:
+            return self.teacher_profile.employee_id
+        return None
+
+    @property
+    def designation(self) -> Optional[str]:
+        if self.teacher_profile:
+            return self.teacher_profile.designation
+        return None
+
+    @property
+    def section_name(self) -> Optional[str]:
+        if self.student_profile:
+            return self.student_profile.section_name
+        return None

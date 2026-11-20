@@ -300,7 +300,30 @@ async def update_classroom(
     room = await repo.get_by_id(classroom_id)
     if not room:
         raise HTTPException(status_code=404, detail="Classroom not found")
-    return await repo.update(room, payload)
+
+    data = payload.model_dump(exclude_unset=True)
+    if "mode" in data or "proximity_mode" in data:
+        raw_mode = data.pop("mode", None) or data.pop("proximity_mode", None)
+        if raw_mode:
+            if str(raw_mode).lower() == "teacher_phone":
+                room.proximity_mode = ProximityMode.TEACHER_PHONE
+            else:
+                room.proximity_mode = ProximityMode.BEACON
+
+    if "floor" in data and data["floor"] is not None:
+        try:
+            room.floor = int(str(data["floor"]).replace("Ground", "0").replace("G", "0").strip())
+        except ValueError:
+            room.floor = 0
+        data.pop("floor", None)
+
+    for key, val in data.items():
+        if hasattr(room, key) and key not in ("id", "college_id"):
+            setattr(room, key, val)
+
+    await db.commit()
+    await db.refresh(room)
+    return room
 
 
 @router.delete("/classrooms/{classroom_id}", response_model=MessageResponse)
@@ -324,15 +347,55 @@ async def create_beacon(payload: BeaconCreate, db: AsyncSession = Depends(get_db
             classroom_id = uuid.UUID(str(payload.classroom_id))
         except (ValueError, TypeError):
             pass
-    if not classroom_id:
-        default_col = await get_or_create_default_college(db)
-        default_room = await get_or_create_default_classroom(db, default_col.id)
-        classroom_id = default_room.id
+
+    default_col = await get_or_create_default_college(db)
 
     label = payload.label or f"Beacon-{payload.uuid[-6:]}"
     is_active = True
     if payload.status == "inactive" or payload.is_active is False:
         is_active = False
+
+    if classroom_id:
+        # Check if a beacon already exists for this classroom
+        existing_stmt = select(Beacon).where(Beacon.classroom_id == classroom_id)
+        existing_beacon = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing_beacon:
+            # Update existing beacon configuration
+            existing_beacon.uuid = payload.uuid
+            existing_beacon.major = payload.major or 100
+            existing_beacon.minor = payload.minor or 10
+            existing_beacon.label = label
+            existing_beacon.is_active = is_active
+            await db.commit()
+            await db.refresh(existing_beacon)
+            return existing_beacon
+    else:
+        # Find a classroom that does NOT have a beacon yet
+        subq = select(Beacon.classroom_id)
+        avail_stmt = select(Classroom).where(
+            Classroom.college_id == default_col.id,
+            ~Classroom.id.in_(subq)
+        ).limit(1)
+        avail_room = (await db.execute(avail_stmt)).scalar_one_or_none()
+        
+        if avail_room:
+            classroom_id = avail_room.id
+        else:
+            # Create a dedicated classroom for this beacon
+            new_room = Classroom(
+                id=uuid.uuid4(),
+                college_id=default_col.id,
+                name=f"Room {label}",
+                code=f"CR-{str(uuid.uuid4())[:6].upper()}",
+                building="Main Block",
+                floor=1,
+                capacity=60,
+                proximity_mode=ProximityMode.BEACON,
+                is_active=True,
+            )
+            db.add(new_room)
+            await db.flush()
+            classroom_id = new_room.id
 
     beacon = Beacon(
         id=uuid.uuid4(),
@@ -532,7 +595,24 @@ async def update_section(
     sec = await repo.get_by_id(section_id)
     if not sec:
         raise HTTPException(status_code=404, detail="Section not found")
-    return await repo.update(sec, payload)
+
+    data = payload.model_dump(exclude_unset=True)
+    if "capacity" in data and "max_students" not in data:
+        data["max_students"] = data.pop("capacity")
+    if "academic_year" in data and "year" not in data:
+        raw_yr = data.pop("academic_year")
+        try:
+            data["year"] = int(str(raw_yr).split("-")[0].strip())
+        except (ValueError, TypeError):
+            data["year"] = 2026
+
+    for key, val in data.items():
+        if hasattr(sec, key) and key not in ("id", "department_id"):
+            setattr(sec, key, val)
+
+    await db.commit()
+    await db.refresh(sec)
+    return sec
 
 
 @router.delete("/sections/{section_id}", response_model=MessageResponse)
@@ -638,6 +718,7 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ) -> PaginatedResponse[UserRead]:
     from sqlalchemy import or_
+    from sqlalchemy.orm import selectinload
 
     user_role = None
     if role and role.lower() != "all":
@@ -649,7 +730,13 @@ async def list_users(
     skip = (page - 1) * page_size
 
     # Build base statement
-    stmt = select(User)
+    stmt = (
+        select(User)
+        .options(
+            selectinload(User.student_profile),
+            selectinload(User.teacher_profile),
+        )
+    )
     if user_role:
         stmt = stmt.where(User.role == user_role)
     if search:

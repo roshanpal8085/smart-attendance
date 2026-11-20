@@ -54,5 +54,9 @@ class UserRead(BaseModel):
     last_login_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    roll_number: str | None = None
+    employee_id: str | None = None
+    designation: str | None = None
+    section_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
