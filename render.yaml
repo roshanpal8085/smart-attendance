@@ -1,0 +1,62 @@
+services:
+  # ─────────────────────────────────────────────────────────────
+  # FastAPI Backend Web Service
+  # ─────────────────────────────────────────────────────────────
+  - type: web
+    name: smart-attendance-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    preDeployCommand: alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-attendance-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: smart-attendance-redis
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: JWT_ACCESS_TOKEN_MINUTES
+        value: "30"
+      - key: JWT_REFRESH_TOKEN_DAYS
+        value: "7"
+      - key: ATTENDANCE_SESSION_DURATION_SECONDS
+        value: "120"
+      - key: PRESENCE_WINDOW_REQUIRED_SECONDS
+        value: "900"
+      - key: BLE_RSSI_THRESHOLD
+        value: "-80"
+      - key: CORS_ORIGINS
+        value: "*"
+
+  # ─────────────────────────────────────────────────────────────
+  # Redis Key-Value Store (Session & Cache)
+  # ─────────────────────────────────────────────────────────────
+  - type: keyvalue
+    name: smart-attendance-redis
+    plan: free
+    region: oregon
+    ipAllowList: []
+
+databases:
+  # ─────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ─────────────────────────────────────────────────────────────
+  - name: smart-attendance-db
+    plan: free
+    databaseName: attendance_db
+    user: attendance_user
+    region: oregon
