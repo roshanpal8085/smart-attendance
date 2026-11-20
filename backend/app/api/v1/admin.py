@@ -628,7 +628,7 @@ async def delete_section(section_id: uuid.UUID, db: AsyncSession = Depends(get_d
 # ==========================================
 
 @router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
+async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> UserRead:
     """Create a new user with hashed Argon2id password, and auto-provision Student/Teacher profiles if applicable."""
     email_clean = payload.email.lower().strip()
     existing_stmt = select(User).where(User.email == email_clean)
@@ -670,10 +670,15 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -
     default_col = await get_or_create_default_college(db)
     default_dept = await get_or_create_default_department(db, default_col.id)
 
+    roll_val = None
+    sec_name_val = None
+    emp_id_val = None
+    desig_val = None
+
     if user_role == UserRole.STUDENT:
-        roll = payload.roll_number or f"STU-{str(uuid.uuid4())[:8].upper()}"
+        roll_val = payload.roll_number or f"STU-{str(uuid.uuid4())[:8].upper()}"
         enr = f"ENR-{str(uuid.uuid4())[:8].upper()}"
-        sec_name = payload.section_name or "Section A"
+        sec_name_val = payload.section_name or "Section A"
         yr = payload.enrollment_year or 2026
 
         profile = StudentProfile(
@@ -681,32 +686,48 @@ async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -
             user_id=user.id,
             college_id=default_col.id,
             department_id=default_dept.id,
-            roll_number=roll,
+            roll_number=roll_val,
             enrollment_number=enr,
             semester=1,
-            section_name=sec_name,
+            section_name=sec_name_val,
             year_of_admission=yr,
         )
         db.add(profile)
         await db.commit()
 
     elif user_role == UserRole.TEACHER:
-        emp_id = payload.employee_id or f"EMP-{str(uuid.uuid4())[:8].upper()}"
-        desig = payload.designation or "Faculty Member"
+        emp_id_val = payload.employee_id or f"EMP-{str(uuid.uuid4())[:8].upper()}"
+        desig_val = payload.designation or "Faculty Member"
 
         profile = TeacherProfile(
             id=uuid.uuid4(),
             user_id=user.id,
             college_id=default_col.id,
             department_id=default_dept.id,
-            employee_id=emp_id,
-            designation=desig,
+            employee_id=emp_id_val,
+            designation=desig_val,
             is_hod=False,
         )
         db.add(profile)
         await db.commit()
 
-    return user
+    return UserRead(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        phone=user.phone,
+        role=user.role,
+        avatar_url=user.avatar_url,
+        is_active=user.is_active,
+        is_verified=user.is_verified,
+        last_login_at=user.last_login_at,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+        roll_number=roll_val,
+        section_name=sec_name_val,
+        employee_id=emp_id_val,
+        designation=desig_val,
+    )
 
 
 @router.get("/users", response_model=PaginatedResponse[UserRead])
@@ -756,8 +777,19 @@ async def list_users(
     users = (await db.execute(stmt)).scalars().all()
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
+    items = []
+    for u in users:
+        ur = UserRead.model_validate(u)
+        if u.student_profile:
+            ur.roll_number = u.student_profile.roll_number
+            ur.section_name = u.student_profile.section_name
+        if u.teacher_profile:
+            ur.employee_id = u.teacher_profile.employee_id
+            ur.designation = u.teacher_profile.designation
+        items.append(ur)
+
     return PaginatedResponse(
-        items=[UserRead.model_validate(u) for u in users],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
@@ -766,12 +798,27 @@ async def list_users(
 
 
 @router.get("/users/{user_id}", response_model=UserRead)
-async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> User:
-    repo = BaseRepository(User, db)
-    user = await repo.get_by_id(user_id)
+async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> UserRead:
+    from sqlalchemy.orm import selectinload
+    stmt = (
+        select(User)
+        .options(
+            selectinload(User.student_profile),
+            selectinload(User.teacher_profile),
+        )
+        .where(User.id == user_id)
+    )
+    user = (await db.execute(stmt)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    ur = UserRead.model_validate(user)
+    if user.student_profile:
+        ur.roll_number = user.student_profile.roll_number
+        ur.section_name = user.student_profile.section_name
+    if user.teacher_profile:
+        ur.employee_id = user.teacher_profile.employee_id
+        ur.designation = user.teacher_profile.designation
+    return ur
 
 
 @router.put("/users/{user_id}", response_model=UserRead)
