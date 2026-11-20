@@ -2,6 +2,9 @@
 
 > An IoT-assisted, BLE-beacon-enabled attendance tracking platform for colleges — built with FastAPI, Next.js, and React Native.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/roshanpal8085/smart-attendance)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Froshanpal8085%2Fsmart-attendance&root-directory=apps%2Fadmin-web&env=NEXT_PUBLIC_API_URL,NEXTAUTH_SECRET,NEXTAUTH_URL)
+
 ---
 
 ## Table of Contents
