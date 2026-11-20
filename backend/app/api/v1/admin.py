@@ -48,13 +48,82 @@ router = APIRouter(
 
 
 # ==========================================
+# HELPERS FOR DEFAULT ENTITIES
+# ==========================================
+
+async def get_or_create_default_college(db: AsyncSession) -> College:
+    col = (await db.execute(select(College))).scalars().first()
+    if not col:
+        col = College(
+            id=uuid.uuid4(),
+            name="Demo University / College of Engineering",
+            code="COE-01",
+            city="Main Campus",
+            country="India",
+        )
+        db.add(col)
+        await db.commit()
+        await db.refresh(col)
+    return col
+
+
+async def get_or_create_default_department(db: AsyncSession, college_id: uuid.UUID) -> Department:
+    dept = (await db.execute(select(Department))).scalars().first()
+    if not dept:
+        dept = Department(
+            id=uuid.uuid4(),
+            college_id=college_id,
+            name="Computer Science & Engineering",
+            code="CSE",
+        )
+        db.add(dept)
+        await db.commit()
+        await db.refresh(dept)
+    return dept
+
+
+async def get_or_create_default_classroom(db: AsyncSession, college_id: uuid.UUID) -> Classroom:
+    room = (await db.execute(select(Classroom))).scalars().first()
+    if not room:
+        room = Classroom(
+            id=uuid.uuid4(),
+            college_id=college_id,
+            name="Hall A - 101",
+            code="LH-101",
+            building="Main Academic Block",
+            floor=1,
+            capacity=60,
+            proximity_mode=ProximityMode.BEACON,
+            is_active=True,
+        )
+        db.add(room)
+        await db.commit()
+        await db.refresh(room)
+    return room
+
+
+# ==========================================
 # 1. COLLEGE CRUD
 # ==========================================
 
 @router.post("/colleges", response_model=CollegeRead, status_code=status.HTTP_201_CREATED)
 async def create_college(payload: CollegeCreate, db: AsyncSession = Depends(get_db)) -> College:
-    repo = BaseRepository(College, db)
-    return await repo.create(payload)
+    code = payload.code or f"COL-{str(uuid.uuid4())[:6].upper()}"
+    college = College(
+        id=uuid.uuid4(),
+        name=payload.name,
+        code=code,
+        address=payload.address,
+        city=payload.city,
+        state=payload.state,
+        country=payload.country or "India",
+        logo_url=payload.logo_url,
+        website=payload.website,
+    )
+    db.add(college)
+    await db.commit()
+    await db.refresh(college)
+    return college
 
 
 @router.get("/colleges", response_model=list[CollegeRead])
@@ -99,8 +168,28 @@ async def delete_college(college_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 @router.post("/departments", response_model=DepartmentRead, status_code=status.HTTP_201_CREATED)
 async def create_department(payload: DepartmentCreate, db: AsyncSession = Depends(get_db)) -> Department:
-    repo = BaseRepository(Department, db)
-    return await repo.create(payload)
+    # Resolve valid college_id
+    college_id = None
+    if payload.college_id:
+        try:
+            college_id = uuid.UUID(str(payload.college_id))
+        except (ValueError, TypeError):
+            pass
+    if not college_id:
+        default_col = await get_or_create_default_college(db)
+        college_id = default_col.id
+
+    code = payload.code or f"DEPT-{str(uuid.uuid4())[:6].upper()}"
+    dept = Department(
+        id=uuid.uuid4(),
+        college_id=college_id,
+        name=payload.name,
+        code=code,
+    )
+    db.add(dept)
+    await db.commit()
+    await db.refresh(dept)
+    return dept
 
 
 @router.get("/departments", response_model=list[DepartmentRead])
@@ -136,8 +225,50 @@ async def delete_department(department_id: uuid.UUID, db: AsyncSession = Depends
 
 @router.post("/classrooms", response_model=ClassroomRead, status_code=status.HTTP_201_CREATED)
 async def create_classroom(payload: ClassroomCreate, db: AsyncSession = Depends(get_db)) -> Classroom:
-    repo = BaseRepository(Classroom, db)
-    return await repo.create(payload)
+    # Resolve college_id
+    college_id = None
+    if payload.college_id:
+        try:
+            college_id = uuid.UUID(str(payload.college_id))
+        except (ValueError, TypeError):
+            pass
+    if not college_id:
+        default_col = await get_or_create_default_college(db)
+        college_id = default_col.id
+
+    # Resolve proximity_mode
+    mode_str = payload.mode or payload.proximity_mode
+    if isinstance(mode_str, ProximityMode):
+        mode_val = mode_str
+    elif str(mode_str).upper() in ["TEACHER_PHONE", "PHONE"]:
+        mode_val = ProximityMode.TEACHER_PHONE
+    else:
+        mode_val = ProximityMode.BEACON
+
+    # Resolve floor
+    floor_val = 0
+    if payload.floor is not None:
+        try:
+            floor_val = int(payload.floor)
+        except (ValueError, TypeError):
+            floor_val = 0
+
+    code = payload.code or f"CR-{str(uuid.uuid4())[:6].upper()}"
+    room = Classroom(
+        id=uuid.uuid4(),
+        college_id=college_id,
+        name=payload.name,
+        code=code,
+        building=payload.building or "Main Academic Block",
+        floor=floor_val,
+        capacity=payload.capacity or 60,
+        proximity_mode=mode_val,
+        is_active=payload.is_active,
+    )
+    db.add(room)
+    await db.commit()
+    await db.refresh(room)
+    return room
 
 
 @router.get("/classrooms", response_model=list[ClassroomRead])
@@ -186,8 +317,36 @@ async def delete_classroom(classroom_id: uuid.UUID, db: AsyncSession = Depends(g
 
 @router.post("/beacons", response_model=BeaconRead, status_code=status.HTTP_201_CREATED)
 async def create_beacon(payload: BeaconCreate, db: AsyncSession = Depends(get_db)) -> Beacon:
-    repo = BaseRepository(Beacon, db)
-    return await repo.create(payload)
+    # Resolve classroom_id
+    classroom_id = None
+    if payload.classroom_id:
+        try:
+            classroom_id = uuid.UUID(str(payload.classroom_id))
+        except (ValueError, TypeError):
+            pass
+    if not classroom_id:
+        default_col = await get_or_create_default_college(db)
+        default_room = await get_or_create_default_classroom(db, default_col.id)
+        classroom_id = default_room.id
+
+    label = payload.label or f"Beacon-{payload.uuid[-6:]}"
+    is_active = True
+    if payload.status == "inactive" or payload.is_active is False:
+        is_active = False
+
+    beacon = Beacon(
+        id=uuid.uuid4(),
+        classroom_id=classroom_id,
+        uuid=payload.uuid,
+        major=payload.major or 100,
+        minor=payload.minor or 10,
+        label=label,
+        is_active=is_active,
+    )
+    db.add(beacon)
+    await db.commit()
+    await db.refresh(beacon)
+    return beacon
 
 
 @router.get("/beacons", response_model=list[BeaconRead])
@@ -232,8 +391,34 @@ async def delete_beacon(beacon_id: uuid.UUID, db: AsyncSession = Depends(get_db)
 
 @router.post("/subjects", response_model=SubjectRead, status_code=status.HTTP_201_CREATED)
 async def create_subject(payload: SubjectCreate, db: AsyncSession = Depends(get_db)) -> Subject:
-    repo = BaseRepository(Subject, db)
-    return await repo.create(payload)
+    # Resolve college & department
+    default_col = await get_or_create_default_college(db)
+    college_id = default_col.id
+
+    dept_id = None
+    if payload.department_id:
+        try:
+            dept_id = uuid.UUID(str(payload.department_id))
+        except (ValueError, TypeError):
+            pass
+    if not dept_id:
+        default_dept = await get_or_create_default_department(db, college_id)
+        dept_id = default_dept.id
+
+    code = payload.code or f"SUB-{str(uuid.uuid4())[:6].upper()}"
+    subj = Subject(
+        id=uuid.uuid4(),
+        college_id=college_id,
+        department_id=dept_id,
+        name=payload.name,
+        code=code,
+        credits=payload.credits or 4,
+        semester=payload.semester or 1,
+    )
+    db.add(subj)
+    await db.commit()
+    await db.refresh(subj)
+    return subj
 
 
 @router.get("/subjects", response_model=list[SubjectRead])
@@ -282,8 +467,40 @@ async def delete_subject(subject_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 @router.post("/sections", response_model=SectionRead, status_code=status.HTTP_201_CREATED)
 async def create_section(payload: SectionCreate, db: AsyncSession = Depends(get_db)) -> Section:
-    repo = BaseRepository(Section, db)
-    return await repo.create(payload)
+    default_col = await get_or_create_default_college(db)
+    dept_id = None
+    if payload.department_id:
+        try:
+            dept_id = uuid.UUID(str(payload.department_id))
+        except (ValueError, TypeError):
+            pass
+    if not dept_id:
+        default_dept = await get_or_create_default_department(db, default_col.id)
+        dept_id = default_dept.id
+
+    year_val = payload.year
+    if not year_val and payload.academic_year:
+        try:
+            year_val = int(str(payload.academic_year)[:4])
+        except (ValueError, TypeError):
+            year_val = 2026
+    if not year_val:
+        year_val = 2026
+
+    max_students_val = payload.max_students or payload.capacity or 60
+
+    sec = Section(
+        id=uuid.uuid4(),
+        department_id=dept_id,
+        name=payload.name,
+        semester=payload.semester or 1,
+        year=year_val,
+        max_students=max_students_val,
+    )
+    db.add(sec)
+    await db.commit()
+    await db.refresh(sec)
+    return sec
 
 
 @router.get("/sections", response_model=list[SectionRead])
@@ -332,20 +549,83 @@ async def delete_section(section_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 @router.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(payload: UserCreate, db: AsyncSession = Depends(get_db)) -> User:
-    """Create a new user with hashed Argon2id password."""
-    repo = BaseRepository(User, db)
-    existing_stmt = select(User).where(User.email == payload.email.lower().strip())
+    """Create a new user with hashed Argon2id password, and auto-provision Student/Teacher profiles if applicable."""
+    email_clean = payload.email.lower().strip()
+    existing_stmt = select(User).where(User.email == email_clean)
     existing = (await db.execute(existing_stmt)).scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=409, detail="User email already registered")
 
-    user_dict = payload.model_dump()
-    user_dict["email"] = payload.email.lower().strip()
-    user_dict["password_hash"] = hash_password(user_dict.pop("password"))
-    user = User(**user_dict)
+    raw_password = payload.password or "User@1234"
+    if len(raw_password) < 6:
+        raw_password = "User@1234"
+
+    # Resolve role
+    role_str = str(payload.role.value if hasattr(payload.role, "value") else payload.role).lower()
+    if role_str == "admin":
+        user_role = UserRole.ADMIN
+    elif role_str == "teacher":
+        user_role = UserRole.TEACHER
+    else:
+        user_role = UserRole.STUDENT
+
+    phone_val = payload.phone or payload.phone_number
+
+    user = User(
+        id=uuid.uuid4(),
+        email=email_clean,
+        password_hash=hash_password(raw_password),
+        full_name=payload.full_name,
+        phone=phone_val,
+        role=user_role,
+        avatar_url=payload.avatar_url,
+        is_active=payload.is_active,
+        is_verified=payload.is_verified,
+    )
     db.add(user)
     await db.commit()
     await db.refresh(user)
+
+    # Auto-provision profile for Students or Teachers
+    default_col = await get_or_create_default_college(db)
+    default_dept = await get_or_create_default_department(db, default_col.id)
+
+    if user_role == UserRole.STUDENT:
+        roll = payload.roll_number or f"STU-{str(uuid.uuid4())[:8].upper()}"
+        enr = f"ENR-{str(uuid.uuid4())[:8].upper()}"
+        sec_name = payload.section_name or "Section A"
+        yr = payload.enrollment_year or 2026
+
+        profile = StudentProfile(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            college_id=default_col.id,
+            department_id=default_dept.id,
+            roll_number=roll,
+            enrollment_number=enr,
+            semester=1,
+            section_name=sec_name,
+            year_of_admission=yr,
+        )
+        db.add(profile)
+        await db.commit()
+
+    elif user_role == UserRole.TEACHER:
+        emp_id = payload.employee_id or f"EMP-{str(uuid.uuid4())[:8].upper()}"
+        desig = payload.designation or "Faculty Member"
+
+        profile = TeacherProfile(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            college_id=default_col.id,
+            department_id=default_dept.id,
+            employee_id=emp_id,
+            designation=desig,
+            is_hod=False,
+        )
+        db.add(profile)
+        await db.commit()
+
     return user
 
 
@@ -354,19 +634,39 @@ async def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     role: Optional[str] = None,
+    search: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ) -> PaginatedResponse[UserRead]:
+    from sqlalchemy import or_
+
     user_role = None
-    if role:
+    if role and role.lower() != "all":
         try:
             user_role = UserRole(role.lower())
         except ValueError:
             pass
-    repo = BaseRepository(User, db)
+
     skip = (page - 1) * page_size
-    filters = {"role": user_role} if user_role else {}
-    users = await repo.list(skip=skip, limit=page_size, **filters)
-    total = await repo.count(**filters)
+
+    # Build base statement
+    stmt = select(User)
+    if user_role:
+        stmt = stmt.where(User.role == user_role)
+    if search:
+        pattern = f"%{search}%"
+        stmt = stmt.where(
+            or_(
+                User.full_name.ilike(pattern),
+                User.email.ilike(pattern),
+            )
+        )
+
+    # Count
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = (await db.execute(count_stmt)).scalar_one() or 0
+
+    stmt = stmt.order_by(User.created_at.desc()).offset(skip).limit(page_size)
+    users = (await db.execute(stmt)).scalars().all()
     total_pages = (total + page_size - 1) // page_size if page_size > 0 else 0
 
     return PaginatedResponse(
@@ -397,7 +697,28 @@ async def update_user(
     user = await repo.get_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return await repo.update(user, payload)
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if "phone_number" in update_data and not update_data.get("phone"):
+        update_data["phone"] = update_data.pop("phone_number")
+    else:
+        update_data.pop("phone_number", None)
+
+    if "password" in update_data and update_data["password"]:
+        update_data["password_hash"] = hash_password(update_data.pop("password"))
+    else:
+        update_data.pop("password", None)
+
+    if "role" in update_data and update_data["role"]:
+        role_str = str(update_data["role"].value if hasattr(update_data["role"], "value") else update_data["role"]).lower()
+        if role_str == "admin":
+            update_data["role"] = UserRole.ADMIN
+        elif role_str == "teacher":
+            update_data["role"] = UserRole.TEACHER
+        else:
+            update_data["role"] = UserRole.STUDENT
+
+    return await repo.update(user, update_data)
 
 
 @router.delete("/users/{user_id}", response_model=MessageResponse)

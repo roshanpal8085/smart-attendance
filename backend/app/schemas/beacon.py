@@ -1,38 +1,48 @@
-from __future__ import annotations
-
+import uuid as _uuid
 from datetime import datetime
-from uuid import UUID
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict
 
 
 class BeaconBase(BaseModel):
     uuid: str
-    major: int
-    minor: int
-    classroom_id: UUID
-    label: str
+    major: int = 100
+    minor: int = 10
+    classroom_id: Optional[_uuid.UUID] = None
+    label: Optional[str] = None
+    mac_address: Optional[str] = None
+    battery_level: Optional[int] = 100
+    status: Optional[str] = None
     is_active: bool = True
 
 
 class BeaconCreate(BeaconBase):
-    installed_at: datetime | None = None
+    installed_at: Optional[datetime] = None
 
 
 class BeaconUpdate(BaseModel):
-    uuid: str | None = None
-    major: int | None = None
-    minor: int | None = None
-    classroom_id: UUID | None = None
-    label: str | None = None
-    is_active: bool | None = None
+    uuid: Optional[str] = None
+    major: Optional[int] = None
+    minor: Optional[int] = None
+    classroom_id: Optional[_uuid.UUID] = None
+    label: Optional[str] = None
+    mac_address: Optional[str] = None
+    battery_level: Optional[int] = None
+    status: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
-class BeaconRead(BeaconBase):
-    id: UUID
-    installed_at: datetime
+class BeaconRead(BaseModel):
+    id: _uuid.UUID
+    uuid: str
+    major: int
+    minor: int
+    classroom_id: Optional[_uuid.UUID] = None
+    label: Optional[str] = None
+    is_active: bool
+    installed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-

@@ -8,12 +8,18 @@ if sys.platform == "win32":
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import text, select
+import uuid
 
 from app.api.v1.router import api_v1_router
 from app.api.v1.sessions_ws import router as ws_router
 from app.core.config import settings
-from app.db.session import engine
+from app.db.session import engine, AsyncSessionLocal
+from app.models.user import User
+from app.models.base import UserRole
+from app.models.college import College
+from app.models.department import Department
+from app.security.hashing import hash_password
 from app.middleware.cors import setup_cors
 from app.middleware.exception_handler import setup_exception_handlers
 from app.middleware.logging import setup_logging_middleware
@@ -28,6 +34,56 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def auto_seed_essentials():
+    try:
+        async with AsyncSessionLocal() as db:
+            stmt = select(User).where(User.email == "admin@demo.edu")
+            admin = (await db.execute(stmt)).scalar_one_or_none()
+            if not admin:
+                logger.info("Auto-seeding default admin: admin@demo.edu")
+                admin = User(
+                    id=uuid.uuid4(),
+                    email="admin@demo.edu",
+                    password_hash=hash_password("Admin@1234"),
+                    full_name="System Administrator",
+                    role=UserRole.ADMIN,
+                    is_active=True,
+                    is_verified=True,
+                )
+                db.add(admin)
+                await db.commit()
+
+            c_stmt = select(College)
+            college = (await db.execute(c_stmt)).scalars().first()
+            if not college:
+                logger.info("Auto-seeding default college")
+                college = College(
+                    id=uuid.uuid4(),
+                    name="Demo University / College of Engineering",
+                    code="COE-01",
+                    city="Main Campus",
+                    country="India",
+                )
+                db.add(college)
+                await db.commit()
+                await db.refresh(college)
+
+            d_stmt = select(Department)
+            dept = (await db.execute(d_stmt)).scalars().first()
+            if not dept:
+                logger.info("Auto-seeding default department")
+                dept = Department(
+                    id=uuid.uuid4(),
+                    college_id=college.id,
+                    name="Computer Science & Engineering",
+                    code="CSE",
+                )
+                db.add(dept)
+                await db.commit()
+    except Exception as e:
+        logger.warning("Auto-seed error (non-fatal): %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(
@@ -36,6 +92,8 @@ async def lifespan(app: FastAPI):
         settings.APP_VERSION,
         settings.APP_ENV,
     )
+
+    await auto_seed_essentials()
 
     # Launch background worker for automated session expiry
     stop_event = asyncio.Event()

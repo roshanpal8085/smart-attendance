@@ -13,7 +13,7 @@ const userSchema = z.object({
   full_name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Please enter a valid email address'),
   role: z.enum(['admin', 'teacher', 'student']),
-  phone_number: z.string().optional(),
+  phone: z.string().optional(),
   password: z
     .string()
     .optional()
@@ -45,7 +45,7 @@ export function UserForm({ initialData, onSubmit, onCancel, isLoading = false }:
       full_name: initialData?.full_name || '',
       email: initialData?.email || '',
       role: initialData?.role || 'student',
-      phone_number: initialData?.phone_number || '',
+      phone: initialData?.phone || '',
       password: '',
       is_active: initialData?.is_active ?? true,
     },
@@ -82,8 +82,8 @@ export function UserForm({ initialData, onSubmit, onCancel, isLoading = false }:
       <Input
         label="Phone Number (Optional)"
         placeholder="+1-555-0199"
-        error={errors.phone_number?.message}
-        {...register('phone_number')}
+        error={errors.phone?.message}
+        {...register('phone')}
       />
 
       <Input
